@@ -1,0 +1,287 @@
+diff --git a/src/lib/code-review.ts b/src/lib/code-review.ts
+index 5e9577b..a5d3763 100644
+--- a/src/lib/code-review.ts
++++ b/src/lib/code-review.ts
+@@ -1,65 +1,140 @@
+ export type FindingSeverity = "critical" | "high" | "medium" | "low";
+ 
+ export interface CodeFinding {
++  /** Rule identifier. Several findings can share one id. */
+   id: string;
++  /** Unique per finding (rule id + line). Use this for selection and React keys. */
++  key: string;
+   title: string;
+   severity: FindingSeverity;
+   category: "Security" | "Quality";
+   line: number;
+   explanation: string;
+   suggestion: string;
++  /** Full replacement for the flagged line. */
+   replacement: string;
+ }
+ 
++interface Rule {
++  id: string;
++  title: string;
++  severity: FindingSeverity;
++  category: CodeFinding["category"];
++  explanation: string;
++  suggestion: string;
++  test: (line: string) => boolean;
++  fix: (line: string) => string;
++}
++
++const indentOf = (line: string) => line.match(/^\s*/)?.[0] ?? "";
++
++const rules: Rule[] = [
++  {
++    id: "hardcoded-secret",
++    title: "A password is written directly in the code",
++    severity: "high",
++    category: "Security",
++    explanation:
++      "Anyone who can read or share this file can see the password. Even a test password can accidentally get reused.",
++    suggestion:
++      "Keep credentials out of source files. Read a secret from your server’s environment and change this exposed value.",
++    test: (line) =>
++      /\b(?:password|secret|api[_-]?key|token)\s*=\s*["'`][^"'`]{4,}["'`]/i.test(line),
++    fix: () => "  const password = process.env.DB_PASSWORD;",
++  },
++  {
++    id: "sql-interpolation",
++    title: "User input is inserted directly into a database query",
++    severity: "critical",
++    category: "Security",
++    explanation:
++      "A specially written user ID could change what this SQL query does. This is a common way attackers access data they should not see.",
++    suggestion:
++      "Use a parameterized query. The database treats the user ID as a value instead of executable SQL.",
++    test: (line) => /\b(?:SELECT|INSERT|UPDATE|DELETE)\b/i.test(line) && /\$\{[^}]+\}/.test(line),
++    fix: () => '  const query = "SELECT * FROM users WHERE id = ?";',
++  },
++  {
++    id: "dynamic-eval",
++    title: "This code runs text as a program",
++    severity: "high",
++    category: "Security",
++    explanation:
++      "If that text comes from a user, they may be able to make your app run unexpected commands.",
++    suggestion:
++      "Avoid eval. Use a specific, safe parser or a small set of allowed actions instead.",
++    test: (line) => /\beval\s*\(/.test(line),
++    fix: () => "  // Replace eval with a safe parser for the expected input.",
++  },
++  {
++    id: "inner-html",
++    title: "Text is placed on the page as raw HTML",
++    severity: "high",
++    category: "Security",
++    explanation:
++      "If the text contains a <script> tag or similar, the browser will run it. This is called cross-site scripting (XSS).",
++    suggestion:
++      "Use textContent when you only need to show text. It displays the value as-is and never runs it.",
++    test: (line) => /\.innerHTML\s*=(?!=)/.test(line),
++    fix: (line) => line.replace(/\.innerHTML\s*=/, ".textContent ="),
++  },
++  {
++    id: "empty-catch",
++    title: "An error is caught and silently ignored",
++    severity: "medium",
++    category: "Quality",
++    explanation:
++      "When something goes wrong, nothing tells you. The bug is still there, but it becomes much harder to find.",
++    suggestion: "At minimum, log the error so you can see what failed.",
++    test: (line) => /catch\s*(?:\(\s*\w*\s*\))?\s*\{\s*\}/.test(line),
++    fix: (line) =>
++      line.replace(
++        /catch\s*(?:\(\s*(\w*)\s*\))?\s*\{\s*\}/,
++        (_m, name?: string) => `catch (${name || "error"}) { console.error(${name || "error"}); }`,
++      ),
++  },
++  {
++    id: "loose-equality",
++    title: "Values are compared with == instead of ===",
++    severity: "low",
++    category: "Quality",
++    explanation:
++      '== converts types before comparing, so 0 == "" is true. This leads to surprising bugs.',
++    suggestion: "Use === (and !==) so values are only equal when type and value both match.",
++    test: (line) => /[^=!<>]==(?!=)/.test(line) || /!=(?!=)/.test(line),
++    fix: (line) => line.replace(/([^=!<>])==(?!=)/g, "$1===").replace(/!=(?!=)/g, "!=="),
++  },
++  {
++    id: "var-keyword",
++    title: "var is used to declare a variable",
++    severity: "low",
++    category: "Quality",
++    explanation:
++      "var is function-scoped and can be used before it is defined, which causes confusing bugs.",
++    suggestion: "Use const for values that don’t change, and let for values that do.",
++    test: (line) => /^\s*var\s+\w+/.test(line),
++    fix: (line) => `${indentOf(line)}${line.trim().replace(/^var\b/, "let")}`,
++  },
++];
++
+ export function analyzeCode(source: string): CodeFinding[] {
+   const findings: CodeFinding[] = [];
+ 
+   source.split("\n").forEach((line, index) => {
+     const lineNumber = index + 1;
+ 
+-    if (/\b(?:password|secret|api[_-]?key|token)\s*=\s*["'`][^"'`]{4,}["'`]/i.test(line)) {
+-      findings.push({
+-        id: "hardcoded-secret",
+-        title: "A password is written directly in the code",
+-        severity: "high",
+-        category: "Security",
+-        line: lineNumber,
+-        explanation:
+-          "Anyone who can read or share this file can see the password. Even a test password can accidentally get reused.",
+-        suggestion:
+-          "Keep credentials out of source files. Read a secret from your server’s environment and change this exposed value.",
+-        replacement: "  const password = process.env.DB_PASSWORD;",
+-      });
+-    }
+-
+-    const containsSql = /\b(?:SELECT|INSERT|UPDATE|DELETE)\b/i.test(line);
+-    if (containsSql && /\$\{[^}]+\}/.test(line)) {
+-      findings.push({
+-        id: "sql-interpolation",
+-        title: "User input is inserted directly into a database query",
+-        severity: "critical",
+-        category: "Security",
+-        line: lineNumber,
+-        explanation:
+-          "A specially written user ID could change what this SQL query does. This is a common way attackers access data they should not see.",
+-        suggestion:
+-          "Use a parameterized query. The database treats the user ID as a value instead of executable SQL.",
+-        replacement: '  const query = "SELECT * FROM users WHERE id = ?";',
+-      });
+-    }
+-
+-    if (/\beval\s*\(/.test(line)) {
++    for (const rule of rules) {
++      if (!rule.test(line)) continue;
+       findings.push({
+-        id: "dynamic-eval",
+-        title: "This code runs text as a program",
+-        severity: "high",
+-        category: "Security",
++        id: rule.id,
++        key: `${rule.id}-${lineNumber}`,
++        title: rule.title,
++        severity: rule.severity,
++        category: rule.category,
+         line: lineNumber,
+-        explanation:
+-          "If that text comes from a user, they may be able to make your app run unexpected commands.",
+-        suggestion:
+-          "Avoid eval. Use a specific, safe parser or a small set of allowed actions instead.",
+-        replacement: "  // Replace eval with a safe parser for the expected input.",
++        explanation: rule.explanation,
++        suggestion: rule.suggestion,
++        replacement: rule.fix(line),
+       });
+     }
+   });
+@@ -79,4 +154,4 @@ export function scoreCode(findings: CodeFinding[]): number {
+     100 - findings.reduce((score, finding) => score + deductions[finding.severity], 0),
+     0,
+   );
+-}
+\ No newline at end of file
++}
+diff --git a/src/routes/index.tsx b/src/routes/index.tsx
+index 6251925..67edceb 100644
+--- a/src/routes/index.tsx
++++ b/src/routes/index.tsx
+@@ -87,6 +87,7 @@ function ReviewWorkspace() {
+   const visibleFindings = findings.filter((finding) => {
+     if (filter === "Critical") return finding.severity === "critical";
+     if (filter === "Security") return finding.category === "Security";
++    if (filter === "Quality") return finding.category === "Quality";
+     return true;
+   });
+   const criticalCount = findings.filter((finding) => finding.severity === "critical").length;
+@@ -118,10 +119,13 @@ function ReviewWorkspace() {
+   }
+ 
+   function selectFinding(finding: CodeFinding) {
+-    setSelectedFinding(selectedFinding === finding.id ? null : finding.id);
++    setSelectedFinding(selectedFinding === finding.key ? null : finding.key);
+     const editor = editorRef.current;
+     if (!editor) return;
+-    const position = source.split("\n").slice(0, finding.line - 1).join("\n").length;
++    const position = source
++      .split("\n")
++      .slice(0, finding.line - 1)
++      .reduce((offset, row) => offset + row.length + 1, 0);
+     editor.focus();
+     editor.setSelectionRange(position, position);
+   }
+@@ -238,11 +242,11 @@ function ReviewWorkspace() {
+               </div>
+ 
+               <div className="findings-filter-bar" role="group" aria-label="Filter review findings">
+-                {["All findings", "Critical", "Security"].map((item) => <button key={item} onClick={() => setFilter(item)} className={`filter-chip ${filter === item ? "filter-chip-active" : ""}`}>{item}<span>{item === "All findings" ? findings.length : item === "Critical" ? criticalCount : findings.filter((finding) => finding.category === "Security").length}</span></button>)}
++                {["All findings", "Critical", "Security", "Quality"].map((item) => <button key={item} onClick={() => setFilter(item)} className={`filter-chip ${filter === item ? "filter-chip-active" : ""}`}>{item}<span>{item === "All findings" ? findings.length : item === "Critical" ? criticalCount : findings.filter((finding) => finding.category === item).length}</span></button>)}
+               </div>
+ 
+               <div className="finding-list">
+-                {visibleFindings.map((finding) => <FindingCard key={`${finding.id}-${finding.line}`} finding={finding} selected={selectedFinding === finding.id} onSelect={() => selectFinding(finding)} onFix={() => applyFix(finding)} />)}
++                {visibleFindings.map((finding) => <FindingCard key={finding.key} finding={finding} selected={selectedFinding === finding.key} onSelect={() => selectFinding(finding)} onFix={() => applyFix(finding)} />)}
+                 {visibleFindings.length === 0 && <div className="empty-findings"><span><ShieldCheck size={24} /></span><strong>No issues in this filter</strong><p>Try another filter or update your code.</p></div>}
+                 {findings.length === 0 && <div className="empty-findings all-clear"><span><ShieldCheck size={24} /></span><strong>Nothing to flag here</strong><p>No common issues matched this code. Keep practicing!</p></div>}
+               </div>
+diff --git a/src/test/code-review.test.ts b/src/test/code-review.test.ts
+index 94857bc..92c0ee8 100644
+--- a/src/test/code-review.test.ts
++++ b/src/test/code-review.test.ts
+@@ -20,4 +20,45 @@ describe("student code review", () => {
+   it("scores code with no detected issues at 100", () => {
+     expect(scoreCode(analyzeCode("const answer = 42;"))).toBe(100);
+   });
+-});
+\ No newline at end of file
++});
++
++describe("additional rules", () => {
++  it("flags innerHTML assignment and suggests textContent", () => {
++    const finding = analyzeCode("  el.innerHTML = userInput;")[0]!;
++
++    expect(finding).toMatchObject({ id: "inner-html", severity: "high", category: "Security" });
++    expect(finding.replacement).toBe("  el.textContent = userInput;");
++  });
++
++  it("flags an empty catch block and keeps the error name in the fix", () => {
++    const finding = analyzeCode("try { run(); } catch (err) {}")[0]!;
++
++    expect(finding).toMatchObject({ id: "empty-catch", category: "Quality" });
++    expect(finding.replacement).toBe("try { run(); } catch (err) { console.error(err); }");
++  });
++
++  it("flags loose equality but not strict equality", () => {
++    expect(analyzeCode("if (a == b) {}")[0]).toMatchObject({ id: "loose-equality" });
++    expect(analyzeCode("if (a != b) {}")[0]?.replacement).toBe("if (a !== b) {}");
++    expect(analyzeCode("if (a === b && c !== d) {}")).toHaveLength(0);
++  });
++
++  it("flags var and keeps indentation in the fix", () => {
++    const finding = analyzeCode("  var count = 0;")[0]!;
++
++    expect(finding).toMatchObject({ id: "var-keyword", severity: "low" });
++    expect(finding.replacement).toBe("  let count = 0;");
++  });
++});
++
++describe("finding keys", () => {
++  it("gives repeated rules on different lines distinct keys", () => {
++    const findings = analyzeCode("var a = 1;\nvar b = 2;");
++
++    expect(findings.map((f) => f.key)).toEqual(["var-keyword-1", "var-keyword-2"]);
++  });
++
++  it("subtracts severity weights from the score", () => {
++    expect(scoreCode(analyzeCode("var a = 1;"))).toBe(95);
++  });
++});
