@@ -87,6 +87,7 @@ function ReviewWorkspace() {
   const visibleFindings = findings.filter((finding) => {
     if (filter === "Critical") return finding.severity === "critical";
     if (filter === "Security") return finding.category === "Security";
+    if (filter === "Quality") return finding.category === "Quality";
     return true;
   });
   const criticalCount = findings.filter((finding) => finding.severity === "critical").length;
@@ -118,10 +119,13 @@ function ReviewWorkspace() {
   }
 
   function selectFinding(finding: CodeFinding) {
-    setSelectedFinding(selectedFinding === finding.id ? null : finding.id);
+    setSelectedFinding(selectedFinding === finding.key ? null : finding.key);
     const editor = editorRef.current;
     if (!editor) return;
-    const position = source.split("\n").slice(0, finding.line - 1).join("\n").length;
+    const position = source
+      .split("\n")
+      .slice(0, finding.line - 1)
+      .reduce((offset, row) => offset + row.length + 1, 0);
     editor.focus();
     editor.setSelectionRange(position, position);
   }
@@ -238,11 +242,11 @@ function ReviewWorkspace() {
               </div>
 
               <div className="findings-filter-bar" role="group" aria-label="Filter review findings">
-                {["All findings", "Critical", "Security"].map((item) => <button key={item} onClick={() => setFilter(item)} className={`filter-chip ${filter === item ? "filter-chip-active" : ""}`}>{item}<span>{item === "All findings" ? findings.length : item === "Critical" ? criticalCount : findings.filter((finding) => finding.category === "Security").length}</span></button>)}
+                {["All findings", "Critical", "Security", "Quality"].map((item) => <button key={item} onClick={() => setFilter(item)} className={`filter-chip ${filter === item ? "filter-chip-active" : ""}`}>{item}<span>{item === "All findings" ? findings.length : item === "Critical" ? criticalCount : findings.filter((finding) => finding.category === item).length}</span></button>)}
               </div>
 
               <div className="finding-list">
-                {visibleFindings.map((finding) => <FindingCard key={`${finding.id}-${finding.line}`} finding={finding} selected={selectedFinding === finding.id} onSelect={() => selectFinding(finding)} onFix={() => applyFix(finding)} />)}
+                {visibleFindings.map((finding) => <FindingCard key={finding.key} finding={finding} selected={selectedFinding === finding.key} onSelect={() => selectFinding(finding)} onFix={() => applyFix(finding)} />)}
                 {visibleFindings.length === 0 && <div className="empty-findings"><span><ShieldCheck size={24} /></span><strong>No issues in this filter</strong><p>Try another filter or update your code.</p></div>}
                 {findings.length === 0 && <div className="empty-findings all-clear"><span><ShieldCheck size={24} /></span><strong>Nothing to flag here</strong><p>No common issues matched this code. Keep practicing!</p></div>}
               </div>
