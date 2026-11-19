@@ -1,0 +1,2 @@
+- [ ] Build the ReviewLab student code-review workspace with an editable editor and interactive findings.
+- [ ] Validate the sample review behavior and preview, then commit the changes.
