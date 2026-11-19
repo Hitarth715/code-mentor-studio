@@ -8,6 +8,13 @@
 // hosting already compresses at the edge.
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+import { loadEnv } from "vite";
+
+// Make server-only GEMINI_* settings from .env.local / .env available as process.env during
+// local dev. They are not VITE_-prefixed, so Vite never ships them to the browser.
+for (const [key, value] of Object.entries(loadEnv("development", process.cwd(), "GEMINI_"))) {
+  process.env[key] ??= value;
+}
 
 export default defineConfig({
   tanstackStart: {
