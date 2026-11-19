@@ -21,3 +21,44 @@ describe("student code review", () => {
     expect(scoreCode(analyzeCode("const answer = 42;"))).toBe(100);
   });
 });
+
+describe("additional rules", () => {
+  it("flags innerHTML assignment and suggests textContent", () => {
+    const finding = analyzeCode("  el.innerHTML = userInput;")[0]!;
+
+    expect(finding).toMatchObject({ id: "inner-html", severity: "high", category: "Security" });
+    expect(finding.replacement).toBe("  el.textContent = userInput;");
+  });
+
+  it("flags an empty catch block and keeps the error name in the fix", () => {
+    const finding = analyzeCode("try { run(); } catch (err) {}")[0]!;
+
+    expect(finding).toMatchObject({ id: "empty-catch", category: "Quality" });
+    expect(finding.replacement).toBe("try { run(); } catch (err) { console.error(err); }");
+  });
+
+  it("flags loose equality but not strict equality", () => {
+    expect(analyzeCode("if (a == b) {}")[0]).toMatchObject({ id: "loose-equality" });
+    expect(analyzeCode("if (a != b) {}")[0]?.replacement).toBe("if (a !== b) {}");
+    expect(analyzeCode("if (a === b && c !== d) {}")).toHaveLength(0);
+  });
+
+  it("flags var and keeps indentation in the fix", () => {
+    const finding = analyzeCode("  var count = 0;")[0]!;
+
+    expect(finding).toMatchObject({ id: "var-keyword", severity: "low" });
+    expect(finding.replacement).toBe("  let count = 0;");
+  });
+});
+
+describe("finding keys", () => {
+  it("gives repeated rules on different lines distinct keys", () => {
+    const findings = analyzeCode("var a = 1;\nvar b = 2;");
+
+    expect(findings.map((f) => f.key)).toEqual(["var-keyword-1", "var-keyword-2"]);
+  });
+
+  it("subtracts severity weights from the score", () => {
+    expect(scoreCode(analyzeCode("var a = 1;"))).toBe(95);
+  });
+});
