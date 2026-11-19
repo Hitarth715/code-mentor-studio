@@ -30,8 +30,13 @@ npm run dev
 ## AI code review
 
 Pressing **Review my code** sends the code to an LLM on the server (`src/lib/review.functions.ts`)
-and shows the structured findings it returns. If no API key is set, or the call fails, the
-built-in regex rules in `src/lib/code-review.ts` are used instead, and the UI says so.
+and shows the structured findings it returns: syntax errors first, then bugs and security
+issues, each with a plain-language explanation. It also returns a fully corrected version of the
+code, shown as a diff with a one-click "Use corrected code" button and Undo. Any programming
+language works; pick one in the dropdown or choose Auto-detect.
+
+If no API key is set, or the call fails, the built-in syntax pre-check (`src/lib/syntax-check.ts`,
+brackets and quotes) and regex rules (`src/lib/code-review.ts`) are used instead, and the UI says so.
 
 Set these server-side environment variables (see `.env.example`):
 

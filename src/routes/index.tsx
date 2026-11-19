@@ -15,6 +15,7 @@ import {
   FlaskConical,
   Github,
   Lightbulb,
+  LoaderCircle,
   LockKeyhole,
   Menu,
   PanelLeftClose,
@@ -23,14 +24,14 @@ import {
   Search,
   Shield,
   ShieldCheck,
-  Loader2,
   Sparkles,
   Terminal,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { AI_MAX_CHARS, applyLineFix } from "@/lib/ai-review";
+import { reviewWithAi } from "@/lib/ai-review.functions";
 import { analyzeCode, scoreCode, type CodeFinding } from "@/lib/code-review";
-import { reviewCode } from "@/lib/review.functions";
 
 const starterCode = `function getUser(userId) {
   const username = "alex";
@@ -83,14 +84,18 @@ function ReviewWorkspace() {
   const [activeNav, setActiveNav] = useState("Code review");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [language, setLanguage] = useState("JavaScript");
-  const [aiReview, setAiReview] = useState<{ findings: CodeFinding[]; model: string } | null>(null);
-  const [reviewing, setReviewing] = useState(false);
-  const [reviewNotice, setReviewNotice] = useState<string | null>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
-  const sourceRef = useRef(source);
-  sourceRef.current = source;
+  const [aiFindings, setAiFindings] = useState<CodeFinding[]>([]);
+  const [aiSnapshot, setAiSnapshot] = useState<string | null>(null);
+  const [aiStatus, setAiStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [aiError, setAiError] = useState("");
   const ruleFindings = useMemo(() => analyzeCode(source), [source]);
-  const findings = aiReview ? aiReview.findings : ruleFindings;
+  // AI line numbers only match the exact text that was reviewed.
+  const aiStale = aiSnapshot !== null && aiSnapshot !== source;
+  const findings = useMemo(
+    () => [...ruleFindings, ...aiFindings].sort((a, b) => a.line - b.line),
+    [ruleFindings, aiFindings],
+  );
   const score = scoreCode(findings);
   const visibleFindings = findings.filter((finding) => {
     if (filter === "Critical") return finding.severity === "critical";
@@ -101,56 +106,60 @@ function ReviewWorkspace() {
   const criticalCount = findings.filter((finding) => finding.severity === "critical").length;
   const highCount = findings.filter((finding) => finding.severity === "high").length;
 
-  function applyFix(finding: CodeFinding) {
-    const rows = source.split("\n");
-    const index = finding.line - 1;
-    if (rows[index] === undefined || !finding.replacement) return;
-
-    const replacementRows = finding.replacement.split("\n");
-    rows.splice(index, 1, ...replacementRows);
-    if (finding.source === "rules" && finding.id === "sql-interpolation") {
-      const queryCall = rows.findIndex((row) => /db\.query\(query\)/.test(row));
-      if (queryCall !== -1) rows[queryCall] = "  return db.query(query, [userId]);";
+  async function runAiReview() {
+    setAiStatus("loading");
+    setAiError("");
+    setSelectedFinding(null);
+    const reviewed = source;
+    try {
+      const result = await reviewWithAi({ data: { source: reviewed, language } });
+      if (!result.ok) {
+        setAiStatus("error");
+        setAiError(result.error);
+        return;
+      }
+      setAiFindings(result.findings);
+      setAiSnapshot(reviewed);
+      setAiStatus("done");
+      setJustReviewed(true);
+      setFilter("All findings");
+    } catch {
+      setAiStatus("error");
+      setAiError("Couldn’t reach the AI review service. Check your connection and try again.");
     }
+  }
 
+  function applyAiFix(finding: CodeFinding) {
+    const result = applyLineFix(source, finding.line, finding.replacement);
+    if (!result) return;
+    setSource(result.source);
     // Keep the remaining AI findings pointing at the right lines after this edit.
-    const delta = replacementRows.length - 1;
-    if (aiReview) {
-      setAiReview({
-        ...aiReview,
-        findings: aiReview.findings
-          .filter((item) => item.key !== finding.key)
-          .map((item) => (item.line > finding.line ? { ...item, line: item.line + delta } : item)),
-      });
-    }
-    setSource(rows.join("\n"));
+    setAiFindings((current) =>
+      current
+        .filter((item) => item.key !== finding.key)
+        .map((item) => (item.line > finding.line ? { ...item, line: item.line + result.delta } : item)),
+    );
+    setAiSnapshot(result.source);
     setSelectedFinding(null);
   }
 
-  async function runReview() {
-    const reviewed = source;
-    setReviewing(true);
-    setReviewNotice(null);
-    setSelectedFinding(null);
-    try {
-      const result = await reviewCode({ data: { source: reviewed, language } });
-      // The student kept typing while we waited, so these line numbers may be stale.
-      if (sourceRef.current !== reviewed) return;
-      if (result.engine === "ai") {
-        setAiReview({ findings: result.findings, model: result.model ?? "AI" });
-      } else {
-        setAiReview(null);
-        setReviewNotice(result.notice ?? null);
-      }
-    } catch {
-      if (sourceRef.current !== reviewed) return;
-      setAiReview(null);
-      setReviewNotice("The AI reviewer couldn't be reached, so the built-in checks were used.");
-    } finally {
-      setReviewing(false);
-      setJustReviewed(true);
-      setFilter("All findings");
+  function applyFix(finding: CodeFinding) {
+    if (finding.source === "ai") {
+      applyAiFix(finding);
+      return;
     }
+    const rows = source.split("\n");
+    if (finding.id === "hardcoded-secret" && rows[finding.line - 1] !== undefined) {
+      rows[finding.line - 1] = finding.replacement;
+    } else if (finding.id === "sql-interpolation" && rows[finding.line - 1] !== undefined) {
+      rows[finding.line - 1] = finding.replacement;
+      const queryCall = rows.findIndex((row) => /db\.query\(query\)/.test(row));
+      if (queryCall !== -1) rows[queryCall] = "  return db.query(query, [userId]);";
+    } else if (rows[finding.line - 1] !== undefined) {
+      rows[finding.line - 1] = finding.replacement;
+    }
+    setSource(rows.join("\n"));
+    setSelectedFinding(null);
   }
 
   async function copySource() {
@@ -188,6 +197,10 @@ function ReviewWorkspace() {
           setSource(starterCode);
           setActiveNav("Code review");
           setFilter("All findings");
+          setAiFindings([]);
+          setAiSnapshot(null);
+          setAiStatus("idle");
+          setAiError("");
         }}>
           <Plus size={17} /> New review
         </Button>
@@ -251,7 +264,7 @@ function ReviewWorkspace() {
             <section className="editor-panel" aria-label="Code editor">
               <div className="editor-header">
                 <div className="editor-title"><Terminal size={16} /><strong>Source code</strong><span className="editor-file-chip">user-auth.js</span></div>
-                <span className="editor-readonly"><LockKeyhole size={12} /> Private to you</span>
+                <span className="editor-readonly"><LockKeyhole size={12} /> Local until AI review</span>
               </div>
               <div className="editor-body">
                 <div className="line-number-rail" aria-hidden="true">{source.split("\n").map((_, index) => {
@@ -263,26 +276,30 @@ function ReviewWorkspace() {
                   aria-label="Source code"
                   spellCheck={false}
                   value={source}
-                  onChange={(event) => { setSource(event.target.value); setJustReviewed(false); setAiReview(null); setReviewNotice(null); }}
+                  onChange={(event) => { setSource(event.target.value); setJustReviewed(false); }}
                   className="code-textarea"
                   rows={Math.max(source.split("\n").length, 9)}
                 />
               </div>
               <div className="editor-footer"><span><span className="footer-live-dot" /> {source.split("\n").length} lines</span><span>{language} · UTF-8</span></div>
               <div className="analyze-footer">
-                <div className="analyze-note"><Sparkles size={15} /><span>Code is sent to the AI reviewer only when you press Review.</span></div>
-                <Button className="analyze-button" onClick={runReview} disabled={reviewing}>{reviewing ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} fill="currentColor" />} {reviewing ? "Reviewing…" : "Review my code"} {!reviewing && <span className="button-arrow">→</span>}</Button>
+                <div className="analyze-note"><Sparkles size={15} /><span>Quick checks run in your browser. AI review sends this code to an AI service.</span></div>
+                <div className="analyze-actions">
+                  <Button variant="outline" className="ai-review-button" disabled={aiStatus === "loading" || source.trim().length === 0 || source.length > AI_MAX_CHARS} onClick={runAiReview}>{aiStatus === "loading" ? <LoaderCircle size={15} className="ai-spinner" /> : <Sparkles size={15} />}{aiStatus === "loading" ? "Reviewing…" : "Review with AI"}</Button>
+                  <Button className="analyze-button" onClick={() => { setJustReviewed(true); setFilter("All findings"); }}><Play size={15} fill="currentColor" /> Review my code <span className="button-arrow">→</span></Button>
+                </div>
               </div>
             </section>
 
             <section className="findings-panel" aria-label="Code review findings">
               <div className="findings-heading">
-                <div><div className="findings-title-row"><span className="findings-icon"><ShieldCheck size={17} /></span><h2>Review findings</h2><span className="finding-count">{findings.length}</span></div><p>{reviewing ? "Your AI mentor is reading your code…" : justReviewed ? "Review complete — here’s what I found." : "A few things to look at together."}</p></div>
+                <div><div className="findings-title-row"><span className="findings-icon"><ShieldCheck size={17} /></span><h2>Review findings</h2><span className="finding-count">{findings.length}</span></div><p>{aiStatus === "loading" ? "The AI mentor is reading your code…" : justReviewed ? "Review complete — here’s what I found." : "A few things to look at together."}</p></div>
                 <Button className="findings-more" size="icon" variant="ghost" aria-label="More review options"><Plus size={18} /></Button>
               </div>
 
-              <div className="engine-row"><span className={`engine-badge ${aiReview ? "engine-badge-ai" : ""}`}>{aiReview ? <><Sparkles size={11} /> AI review · {aiReview.model}</> : <><Shield size={11} /> Built-in checks</>}</span></div>
-              {reviewNotice && <div className="review-notice" role="status"><CircleAlert size={13} /> {reviewNotice}</div>}
+              {aiStatus === "error" && <div className="ai-banner ai-banner-error" role="alert"><CircleAlert size={14} /><span>{aiError}</span></div>}
+              {aiStatus === "done" && aiStale && <div className="ai-banner" role="status"><Sparkles size={14} /><span>You changed the code after the AI review. Run it again before applying AI fixes.</span></div>}
+              {aiStatus === "done" && !aiStale && <div className="ai-banner" role="status"><Sparkles size={14} /><span>{aiFindings.length === 0 ? "The AI mentor found nothing else to flag." : `The AI mentor added ${aiFindings.length} finding${aiFindings.length === 1 ? "" : "s"}.`}</span></div>}
 
               <div className="score-panel">
                 <div className="score-ring" style={{ "--score-progress": `${score}%` } as React.CSSProperties}><div><strong>{score}</strong><span>/100</span></div></div>
@@ -294,7 +311,7 @@ function ReviewWorkspace() {
               </div>
 
               <div className="finding-list">
-                {visibleFindings.map((finding) => <FindingCard key={finding.key} finding={finding} selected={selectedFinding === finding.key} onSelect={() => selectFinding(finding)} onFix={() => applyFix(finding)} />)}
+                {visibleFindings.map((finding) => <FindingCard key={finding.key} finding={finding} selected={selectedFinding === finding.key} onSelect={() => selectFinding(finding)} onFix={() => applyFix(finding)} fixDisabled={finding.source === "ai" && aiStale} />)}
                 {visibleFindings.length === 0 && <div className="empty-findings"><span><ShieldCheck size={24} /></span><strong>No issues in this filter</strong><p>Try another filter or update your code.</p></div>}
                 {findings.length === 0 && <div className="empty-findings all-clear"><span><ShieldCheck size={24} /></span><strong>Nothing to flag here</strong><p>No common issues matched this code. Keep practicing!</p></div>}
               </div>
@@ -303,18 +320,19 @@ function ReviewWorkspace() {
             </section>
           </div>
 
-          <footer className="workspace-footer"><span><Shield size={13} /> This app doesn’t store your code.</span><span>Built for learning, not just linting.</span><button onClick={() => setActiveNav("Documentation")}><BookOpen size={13} /> Help center</button></footer>
+          <footer className="workspace-footer"><span><Shield size={13} /> This app doesn’t store your code; AI review shares it with an AI service.</span><span>Built for learning, not just linting.</span><button onClick={() => setActiveNav("Documentation")}><BookOpen size={13} /> Help center</button></footer>
         </div>
       </main>
     </div>
   );
 }
 
-function FindingCard({ finding, selected, onSelect, onFix }: {
+function FindingCard({ finding, selected, onSelect, onFix, fixDisabled = false }: {
   finding: CodeFinding;
   selected: boolean;
   onSelect: () => void;
   onFix: () => void;
+  fixDisabled?: boolean;
 }) {
   const severityLabel: Record<CodeFinding["severity"], string> = {
     critical: "Critical",
@@ -327,10 +345,10 @@ function FindingCard({ finding, selected, onSelect, onFix }: {
     <article className={`finding-card ${selected ? "finding-card-selected" : ""}`}>
       <button className="finding-card-toggle" onClick={onSelect} aria-expanded={selected}>
         <span className={`severity-icon severity-icon-${finding.severity}`}>{finding.severity === "critical" ? <CircleAlert size={15} /> : <Shield size={14} />}</span>
-        <span className="finding-card-content"><span className="finding-meta"><span className={`severity-pill severity-${finding.severity}`}>{severityLabel[finding.severity]}</span><span>{finding.category}</span>{finding.source === "ai" && <span title="Found by the AI reviewer"><Sparkles size={10} /></span>}</span><strong>{finding.title}</strong><span className="finding-location"><FileText size={12} /> user-auth.js <b>·</b> line {finding.line}</span></span>
+        <span className="finding-card-content"><span className="finding-meta"><span className={`severity-pill severity-${finding.severity}`}>{severityLabel[finding.severity]}</span><span>{finding.category}</span>{finding.source === "ai" && <span className="ai-badge"><Sparkles size={9} /> AI</span>}</span><strong>{finding.title}</strong><span className="finding-location"><FileText size={12} /> user-auth.js <b>·</b> line {finding.line}</span></span>
         <ChevronDown size={16} className={`finding-chevron ${selected ? "finding-chevron-open" : ""}`} />
       </button>
-      {selected && <div className="finding-detail"><p>{finding.explanation}</p><div className="suggestion-block"><span><Lightbulb size={13} /> A safer approach</span><p>{finding.suggestion}</p>{finding.replacement && <code>{finding.replacement}</code>}{finding.replacement && <Button className="apply-fix-button" size="sm" onClick={onFix}><Check size={13} /> Apply this fix</Button>}</div></div>}
+      {selected && <div className="finding-detail"><p>{finding.explanation}</p><div className="suggestion-block"><span><Lightbulb size={13} /> A safer approach</span><p>{finding.suggestion}</p>{finding.replacement ? <><code>{finding.replacement}</code><Button className="apply-fix-button" size="sm" onClick={onFix} disabled={fixDisabled}><Check size={13} /> {fixDisabled ? "Re-run AI review to apply" : "Apply this fix"}</Button></> : <small className="no-auto-fix">This one needs a change in more than one place, so fix it by hand.</small>}</div></div>}
     </article>
   );
 }

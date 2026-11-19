@@ -11,10 +11,10 @@ export interface CodeFinding {
   line: number;
   explanation: string;
   suggestion: string;
-  /** Full replacement for the flagged line. Empty when there is no safe automatic fix. */
+  /** Full replacement for the flagged line. Empty string means no automatic fix. */
   replacement: string;
-  /** Where the finding came from: built-in rules or the LLM reviewer. */
-  source: "rules" | "ai";
+  /** Where the finding came from. Rule-based when omitted. */
+  source?: "rule" | "ai";
 }
 
 interface Rule {
@@ -137,7 +137,7 @@ export function analyzeCode(source: string): CodeFinding[] {
         explanation: rule.explanation,
         suggestion: rule.suggestion,
         replacement: rule.fix(line),
-        source: "rules",
+        source: "rule",
       });
     }
   });
