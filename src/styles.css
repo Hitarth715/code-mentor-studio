@@ -353,3 +353,18 @@ button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2p
 .engine-badge { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; background: var(--muted); color: var(--muted-foreground); padding: 3px 8px; font-size: 9px; font-weight: 600; }
 .engine-badge-ai { background: var(--brand-soft); color: var(--primary); }
 .review-notice { display: flex; align-items: center; gap: 6px; margin: 0 14px 8px; border-radius: 6px; background: var(--muted); color: var(--muted-foreground); padding: 7px 9px; font-size: 9px; line-height: 1.4; }
+
+.notice-undo { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; border: 0; background: transparent; color: var(--primary); padding: 0; font: inherit; font-weight: 600; cursor: pointer; }
+.correction-card { margin: 0 11px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); overflow: hidden; }
+.correction-head { display: flex; gap: 9px; padding: 11px 12px 8px; }
+.correction-head strong { font-size: 11px; font-weight: 600; }
+.correction-head p { margin: 2px 0 0; color: var(--muted-foreground); font-size: 9px; line-height: 1.5; }
+.correction-tabs { display: flex; gap: 4px; padding: 0 12px 6px; }
+.correction-tabs button { border: 0; border-radius: 5px; background: transparent; color: var(--muted-foreground); padding: 4px 8px; font-size: 9px; font-weight: 600; cursor: pointer; }
+.correction-tabs button span { margin-left: 4px; font-family: var(--font-mono); font-weight: 500; }
+.correction-tabs .correction-tab-active { background: var(--muted); color: var(--foreground); }
+.correction-code { max-height: 230px; margin: 0; overflow: auto; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: color-mix(in oklab, var(--muted) 45%, var(--card)); padding: 8px 0; font-family: var(--font-mono); font-size: 9.5px; line-height: 1.6; white-space: pre; }
+.diff-line { display: block; padding: 0 12px; }
+.diff-add { background: color-mix(in oklab, oklch(0.72 0.17 150) 20%, transparent); }
+.diff-del { background: color-mix(in oklab, oklch(0.64 0.2 25) 18%, transparent); color: var(--muted-foreground); text-decoration: line-through; }
+.correction-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; }

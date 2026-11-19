@@ -7,7 +7,7 @@ export interface CodeFinding {
   key: string;
   title: string;
   severity: FindingSeverity;
-  category: "Security" | "Quality";
+  category: "Security" | "Quality" | "Syntax";
   line: number;
   explanation: string;
   suggestion: string;

@@ -10,6 +10,7 @@ import {
   CircleAlert,
   Clock3,
   Code2,
+  Copy,
   FileCode2,
   FileText,
   FlaskConical,
@@ -26,11 +27,15 @@ import {
   Loader2,
   Sparkles,
   Terminal,
+  Undo2,
+  WandSparkles,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { analyzeCode, scoreCode, type CodeFinding } from "@/lib/code-review";
+import { diffLines } from "@/lib/diff";
 import { reviewCode } from "@/lib/review.functions";
+import { checkSyntax } from "@/lib/syntax-check";
 
 const starterCode = `function getUser(userId) {
   const username = "alex";
@@ -83,18 +88,28 @@ function ReviewWorkspace() {
   const [activeNav, setActiveNav] = useState("Code review");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [language, setLanguage] = useState("JavaScript");
-  const [aiReview, setAiReview] = useState<{ findings: CodeFinding[]; model: string } | null>(null);
+  const [aiReview, setAiReview] = useState<{
+    findings: CodeFinding[];
+    model: string;
+    correctedCode?: string | undefined;
+    summary?: string | undefined;
+  } | null>(null);
+  const [undoSource, setUndoSource] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const sourceRef = useRef(source);
   sourceRef.current = source;
-  const ruleFindings = useMemo(() => analyzeCode(source), [source]);
+  const ruleFindings = useMemo(
+    () => [...checkSyntax(source, language), ...analyzeCode(source)],
+    [source, language],
+  );
   const findings = aiReview ? aiReview.findings : ruleFindings;
   const score = scoreCode(findings);
   const visibleFindings = findings.filter((finding) => {
     if (filter === "Critical") return finding.severity === "critical";
     if (filter === "Security") return finding.category === "Security";
+    if (filter === "Syntax") return finding.category === "Syntax";
     if (filter === "Quality") return finding.category === "Quality";
     return true;
   });
@@ -137,7 +152,12 @@ function ReviewWorkspace() {
       // The student kept typing while we waited, so these line numbers may be stale.
       if (sourceRef.current !== reviewed) return;
       if (result.engine === "ai") {
-        setAiReview({ findings: result.findings, model: result.model ?? "AI" });
+        setAiReview({
+          findings: result.findings,
+          model: result.model ?? "AI",
+          correctedCode: result.correctedCode,
+          summary: result.summary,
+        });
       } else {
         setAiReview(null);
         setReviewNotice(result.notice ?? null);
@@ -150,6 +170,33 @@ function ReviewWorkspace() {
       setReviewing(false);
       setJustReviewed(true);
       setFilter("All findings");
+    }
+  }
+
+  function acceptCorrection() {
+    if (!aiReview?.correctedCode) return;
+    setUndoSource(source);
+    setSource(aiReview.correctedCode);
+    setAiReview(null);
+    setSelectedFinding(null);
+    setJustReviewed(false);
+    setReviewNotice("Corrected code applied. Press Review again to double-check it.");
+  }
+
+  function undoCorrection() {
+    if (undoSource === null) return;
+    setSource(undoSource);
+    setUndoSource(null);
+    setAiReview(null);
+    setReviewNotice(null);
+  }
+
+  async function copyCorrected() {
+    if (!aiReview?.correctedCode) return;
+    try {
+      await navigator.clipboard.writeText(aiReview.correctedCode);
+    } catch {
+      /* clipboard can be blocked; the code is still visible in the panel */
     }
   }
 
@@ -241,7 +288,7 @@ function ReviewWorkspace() {
           <section className="review-toolbar" aria-label="Current code file">
             <div className="file-tab"><span className="file-type-icon file-js">JS</span><strong>user-auth.js</strong><span className="unsaved-dot" title="Sample code" /></div>
             <div className="toolbar-controls">
-              <label className="language-select"><span className="sr-only">Code language</span><select value={language} onChange={(event) => setLanguage(event.target.value)}><option>JavaScript</option><option>TypeScript</option><option>Python</option><option>Java</option><option>C++</option></select><ChevronDown size={14} /></label>
+              <label className="language-select"><span className="sr-only">Code language</span><select value={language} onChange={(event) => setLanguage(event.target.value)}><option>Auto-detect</option><option>JavaScript</option><option>TypeScript</option><option>Python</option><option>Java</option><option>C</option><option>C++</option><option>C#</option><option>Go</option><option>PHP</option><option>Ruby</option><option>Rust</option><option>SQL</option><option>HTML</option><option>CSS</option></select><ChevronDown size={14} /></label>
               <span className="toolbar-divider" />
               <Button variant="ghost" size="sm" className="toolbar-copy" onClick={copySource}>{copied ? <Check size={14} /> : <ArrowDownToLine size={14} />}{copied ? "Copied" : "Copy"}</Button>
             </div>
@@ -263,7 +310,7 @@ function ReviewWorkspace() {
                   aria-label="Source code"
                   spellCheck={false}
                   value={source}
-                  onChange={(event) => { setSource(event.target.value); setJustReviewed(false); setAiReview(null); setReviewNotice(null); }}
+                  onChange={(event) => { setSource(event.target.value); setJustReviewed(false); setAiReview(null); setReviewNotice(null); setUndoSource(null); }}
                   className="code-textarea"
                   rows={Math.max(source.split("\n").length, 9)}
                 />
@@ -282,7 +329,7 @@ function ReviewWorkspace() {
               </div>
 
               <div className="engine-row"><span className={`engine-badge ${aiReview ? "engine-badge-ai" : ""}`}>{aiReview ? <><Sparkles size={11} /> AI review · {aiReview.model}</> : <><Shield size={11} /> Built-in checks</>}</span></div>
-              {reviewNotice && <div className="review-notice" role="status"><CircleAlert size={13} /> {reviewNotice}</div>}
+              {(reviewNotice || undoSource !== null) && <div className="review-notice" role="status"><CircleAlert size={13} /> <span>{reviewNotice ?? "Corrected code applied."}</span>{undoSource !== null && <button className="notice-undo" onClick={undoCorrection}><Undo2 size={11} /> Undo</button>}</div>}
 
               <div className="score-panel">
                 <div className="score-ring" style={{ "--score-progress": `${score}%` } as React.CSSProperties}><div><strong>{score}</strong><span>/100</span></div></div>
@@ -290,7 +337,7 @@ function ReviewWorkspace() {
               </div>
 
               <div className="findings-filter-bar" role="group" aria-label="Filter review findings">
-                {["All findings", "Critical", "Security", "Quality"].map((item) => <button key={item} onClick={() => setFilter(item)} className={`filter-chip ${filter === item ? "filter-chip-active" : ""}`}>{item}<span>{item === "All findings" ? findings.length : item === "Critical" ? criticalCount : findings.filter((finding) => finding.category === item).length}</span></button>)}
+                {["All findings", "Critical", "Syntax", "Security", "Quality"].map((item) => <button key={item} onClick={() => setFilter(item)} className={`filter-chip ${filter === item ? "filter-chip-active" : ""}`}>{item}<span>{item === "All findings" ? findings.length : item === "Critical" ? criticalCount : findings.filter((finding) => finding.category === item).length}</span></button>)}
               </div>
 
               <div className="finding-list">
@@ -298,6 +345,8 @@ function ReviewWorkspace() {
                 {visibleFindings.length === 0 && <div className="empty-findings"><span><ShieldCheck size={24} /></span><strong>No issues in this filter</strong><p>Try another filter or update your code.</p></div>}
                 {findings.length === 0 && <div className="empty-findings all-clear"><span><ShieldCheck size={24} /></span><strong>Nothing to flag here</strong><p>No common issues matched this code. Keep practicing!</p></div>}
               </div>
+
+              {aiReview?.correctedCode && <CorrectionCard source={source} code={aiReview.correctedCode} summary={aiReview.summary} onAccept={acceptCorrection} onCopy={copyCorrected} />}
 
               <div className="learning-note"><div className="learning-icon"><Lightbulb size={16} /></div><div><strong>Learn as you go</strong><p>Every finding includes a plain-language explanation and a suggested fix.</p><button onClick={() => setActiveNav("Learning resources")}>Explore learning resources <ArrowRight size={13} /></button></div></div>
             </section>
@@ -332,5 +381,45 @@ function FindingCard({ finding, selected, onSelect, onFix }: {
       </button>
       {selected && <div className="finding-detail"><p>{finding.explanation}</p><div className="suggestion-block"><span><Lightbulb size={13} /> A safer approach</span><p>{finding.suggestion}</p>{finding.replacement && <code>{finding.replacement}</code>}{finding.replacement && <Button className="apply-fix-button" size="sm" onClick={onFix}><Check size={13} /> Apply this fix</Button>}</div></div>}
     </article>
+  );
+}
+
+function CorrectionCard({ source, code, summary, onAccept, onCopy }: {
+  source: string;
+  code: string;
+  summary?: string | undefined;
+  onAccept: () => void;
+  onCopy: () => Promise<void>;
+}) {
+  const [view, setView] = useState<"changes" | "code">("changes");
+  const [copied, setCopied] = useState(false);
+  const diff = useMemo(() => diffLines(source, code), [source, code]);
+  const added = diff.filter((line) => line.type === "add").length;
+  const removed = diff.filter((line) => line.type === "del").length;
+  const marker = { same: "  ", add: "+ ", del: "- " } as const;
+
+  return (
+    <section className="correction-card" aria-label="Corrected code">
+      <div className="correction-head">
+        <span className="findings-icon"><WandSparkles size={16} /></span>
+        <div>
+          <strong>Corrected version</strong>
+          <p>{summary ?? "The AI reviewer prepared a corrected version of your code."}</p>
+        </div>
+      </div>
+      <div className="correction-tabs" role="tablist" aria-label="Corrected code view">
+        <button role="tab" aria-selected={view === "changes"} className={view === "changes" ? "correction-tab-active" : ""} onClick={() => setView("changes")}>Changes <span>+{added} −{removed}</span></button>
+        <button role="tab" aria-selected={view === "code"} className={view === "code" ? "correction-tab-active" : ""} onClick={() => setView("code")}>Full code</button>
+      </div>
+      <pre className="correction-code" tabIndex={0}>
+        {view === "changes"
+          ? diff.map((line, index) => <span key={index} className={`diff-line diff-${line.type}`}>{marker[line.type]}{line.text}{"\n"}</span>)
+          : code}
+      </pre>
+      <div className="correction-actions">
+        <Button size="sm" className="apply-fix-button" onClick={onAccept}><Check size={13} /> Use corrected code</Button>
+        <Button size="sm" variant="ghost" onClick={async () => { await onCopy(); setCopied(true); window.setTimeout(() => setCopied(false), 1800); }}>{copied ? <Check size={13} /> : <Copy size={13} />} {copied ? "Copied" : "Copy"}</Button>
+      </div>
+    </section>
   );
 }

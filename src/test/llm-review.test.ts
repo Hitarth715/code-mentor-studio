@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { buildMessages, parseLlmFindings, readLlmConfig, reviewWithLlm } from "@/lib/llm-review";
+import {
+  buildMessages,
+  parseLlmFindings,
+  parseLlmReply,
+  readLlmConfig,
+  reviewWithLlm,
+} from "@/lib/llm-review";
 
 const code = 'const password = "welcome123";\nel.innerHTML = name;\nconsole.log("ok");';
 
@@ -133,14 +139,15 @@ describe("reviewWithLlm", () => {
       async () => new Response(JSON.stringify({ choices: [{ message: { content: reply } }] })),
     );
 
-    const findings = await reviewWithLlm(
+    const review = await reviewWithLlm(
       config,
       code,
       "JavaScript",
+      [],
       fetchMock as unknown as typeof fetch,
     );
 
-    expect(findings).toHaveLength(1);
+    expect(review.findings).toHaveLength(1);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(config.apiUrl);
     expect((init.headers as Record<string, string>)["authorization"]).toBe("Bearer secret");
@@ -150,7 +157,7 @@ describe("reviewWithLlm", () => {
   it("rejects on HTTP errors", async () => {
     const fetchMock = vi.fn(async () => new Response("nope", { status: 429 }));
     await expect(
-      reviewWithLlm(config, code, "JavaScript", fetchMock as unknown as typeof fetch),
+      reviewWithLlm(config, code, "JavaScript", [], fetchMock as unknown as typeof fetch),
     ).rejects.toThrow(/429/);
   });
 
@@ -159,7 +166,59 @@ describe("reviewWithLlm", () => {
       async () => new Response(JSON.stringify({ choices: [{ message: { content: "" } }] })),
     );
     await expect(
-      reviewWithLlm(config, code, "JavaScript", fetchMock as unknown as typeof fetch),
+      reviewWithLlm(config, code, "JavaScript", [], fetchMock as unknown as typeof fetch),
     ).rejects.toThrow();
+  });
+});
+
+describe("buildMessages hints and language", () => {
+  it("includes the syntax pre-check hints", () => {
+    const user = buildMessages("x", "Python", ["line 1: Missing closing )"])[1]!.content;
+    expect(user).toContain("syntax pre-check");
+    expect(user).toContain("line 1: Missing closing )");
+  });
+
+  it("asks the model to identify the language when set to Auto-detect", () => {
+    const user = buildMessages("x", "Auto-detect")[1]!.content;
+    expect(user).toContain("identify it yourself");
+  });
+});
+
+describe("parseLlmReply (corrected code)", () => {
+  const finding = {
+    title: "Missing bracket",
+    severity: "critical",
+    category: "Syntax error",
+    line: 1,
+    explanation: "A bracket is missing.",
+    suggestion: "Add it.",
+  };
+
+  it("returns the corrected program and summary and recognizes Syntax findings", () => {
+    const raw = JSON.stringify({
+      summary: "Closed the bracket.",
+      findings: [finding],
+      correctedCode: "print('hi')\n",
+    });
+    const review = parseLlmReply(raw, "print('hi'");
+    expect(review.correctedCode).toBe("print('hi')");
+    expect(review.summary).toBe("Closed the bracket.");
+    expect(review.findings[0]).toMatchObject({ category: "Syntax", severity: "critical" });
+  });
+
+  it("strips a markdown fence around the corrected code", () => {
+    const raw = JSON.stringify({ findings: [], correctedCode: "```python\nprint(1)\n```" });
+    expect(parseLlmReply(raw, "print(1").correctedCode).toBe("print(1)");
+  });
+
+  it("ignores corrected code that is identical to the original", () => {
+    const raw = JSON.stringify({ findings: [], correctedCode: "let a = 1;\n" });
+    expect(parseLlmReply(raw, "let a = 1;").correctedCode).toBeUndefined();
+  });
+
+  it("still works for old-style replies without correctedCode", () => {
+    expect(
+      parseLlmReply(JSON.stringify({ findings: [finding] }), "x").correctedCode,
+    ).toBeUndefined();
   });
 });
