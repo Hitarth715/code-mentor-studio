@@ -8,7 +8,7 @@ import {
 import { analyzeCode } from "@/lib/code-review";
 
 const DEFAULT_MODEL = "gemini-2.5-flash";
-const REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 60_000;
 
 interface GeminiResponse {
   candidates?: { content?: { parts?: { text?: string }[] } }[];
@@ -38,6 +38,7 @@ export async function runAiReview(source: string, language: string): Promise<AiR
       systemInstruction: { parts: [{ text: AI_SYSTEM_PROMPT }] },
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
+        temperature: 0.2,
         responseMimeType: "application/json",
         responseSchema: AI_RESPONSE_SCHEMA,
       },

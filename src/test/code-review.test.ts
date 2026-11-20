@@ -62,3 +62,13 @@ describe("finding keys", () => {
     expect(scoreCode(analyzeCode("var a = 1;"))).toBe(95);
   });
 });
+
+describe("language support", () => {
+  it("runs built-in rules only for JavaScript and TypeScript", async () => {
+    const { supportsBuiltInRules, fileInfoFor } = await import("@/lib/code-review");
+    expect(supportsBuiltInRules("JavaScript")).toBe(true);
+    expect(supportsBuiltInRules("TypeScript")).toBe(true);
+    expect(supportsBuiltInRules("Python")).toBe(false);
+    expect(fileInfoFor("Python")).toMatchObject({ name: "user-auth.py", badge: "PY" });
+  });
+});
