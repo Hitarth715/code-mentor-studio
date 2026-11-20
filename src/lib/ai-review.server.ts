@@ -8,7 +8,7 @@ import {
 import { analyzeCode } from "@/lib/code-review";
 
 const DEFAULT_MODEL = "gemini-2.5-flash";
-const REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 60_000;
 
 interface GeminiResponse {
   candidates?: { content?: { parts?: { text?: string }[] } }[];
@@ -30,42 +30,64 @@ export async function runAiReview(source: string, language: string): Promise<AiR
   const model = process.env["GEMINI_MODEL"] || DEFAULT_MODEL;
   const prompt = buildReviewPrompt(source, language, analyzeCode(source));
 
-  let response: Response;
-  try {
-    response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: AI_SYSTEM_PROMPT }] },
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.2,
-            responseMimeType: "application/json",
-            responseSchema: AI_RESPONSE_SCHEMA,
-          },
-        }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const init: RequestInit = {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: AI_SYSTEM_PROMPT }] },
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.2,
+        responseMimeType: "application/json",
+        responseSchema: AI_RESPONSE_SCHEMA,
       },
-    );
-  } catch (error) {
-    console.error("AI review request failed:", error instanceof Error ? error.name : "unknown");
+    }),
+  };
+
+  let response: Response | undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      response = await fetch(endpoint, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    } catch (error) {
+      console.error("AI review request failed:", error instanceof Error ? error.name : "unknown");
+      response = undefined;
+    }
+    // Retry once on a temporary Google-side failure.
+    if (response && ![500, 502, 503, 504].includes(response.status)) break;
+    if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 1200));
+  }
+
+  if (!response) {
     return { ok: false, error: "The AI service didn’t respond in time. Please try again." };
   }
 
   if (!response.ok) {
-    console.error("AI review upstream error, status", response.status);
+    const detail = await response
+      .clone()
+      .json()
+      .then((body: { error?: { message?: string } }) => body?.error?.message ?? "")
+      .catch(() => "");
+    console.error("AI review upstream error, status", response.status, "-", detail.slice(0, 300));
     if (response.status === 400 || response.status === 401 || response.status === 403) {
       return {
         ok: false,
         error: "The AI service rejected the request. Check that GEMINI_API_KEY is valid.",
       };
     }
+    if (response.status === 404) {
+      return {
+        ok: false,
+        error: `The model “${model}” isn’t available for this key. Set GEMINI_MODEL to a current model and restart.`,
+      };
+    }
     if (response.status === 429) {
       return { ok: false, error: "The AI service is busy or over its limit. Try again shortly." };
     }
-    return { ok: false, error: "The AI service had a problem. Please try again." };
+    return {
+      ok: false,
+      error: `The AI service had a problem (status ${response.status}). Please try again in a moment.`,
+    };
   }
 
   const payload = (await response.json().catch(() => null)) as GeminiResponse | null;

@@ -158,3 +158,20 @@ export function scoreCode(findings: CodeFinding[]): number {
     0,
   );
 }
+
+/** The built-in rules are written for JavaScript syntax, so they only run on JS/TS. */
+export function supportsBuiltInRules(language: string): boolean {
+  return language === "JavaScript" || language === "TypeScript";
+}
+
+const FILE_INFO: Record<string, { name: string; badge: string; tone: string }> = {
+  JavaScript: { name: "user-auth.js", badge: "JS", tone: "file-js" },
+  TypeScript: { name: "user-auth.ts", badge: "TS", tone: "file-ts" },
+  Python: { name: "user-auth.py", badge: "PY", tone: "file-py" },
+  Java: { name: "UserAuth.java", badge: "JV", tone: "file-js" },
+  "C++": { name: "user_auth.cpp", badge: "C+", tone: "file-ts" },
+};
+
+export function fileInfoFor(language: string) {
+  return FILE_INFO[language] ?? FILE_INFO["JavaScript"]!;
+}

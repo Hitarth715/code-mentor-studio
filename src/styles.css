@@ -359,3 +359,22 @@ button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2p
 .ai-banner-error > svg { color: var(--destructive); }
 .no-auto-fix { color: var(--muted-foreground); font-size: 9px; line-height: 1.5; }
 @media (max-width: 720px) { .analyze-footer { flex-wrap: wrap; padding-top: 8px; padding-bottom: 8px; } .analyze-actions { width: 100%; justify-content: flex-end; } }
+.view-panel { border: 1px solid var(--border); border-radius: 6px; background: var(--card); box-shadow: var(--shadow-soft); }
+.view-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding: 15px 16px; }
+.view-panel-head h2 { margin: 0; font-size: 13px; font-weight: 650; }
+.view-panel-head p { margin: 4px 0 0; color: var(--muted-foreground); font-size: 10px; }
+.view-list { display: grid; gap: 8px; margin: 0; padding: 12px; list-style: none; }
+.view-row { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--card); transition: border-color 150ms; }
+.view-row:hover, .view-row-current { border-color: color-mix(in oklab, var(--primary) 40%, var(--border)); }
+.view-row-main { display: flex; min-width: 0; flex: 1; align-items: center; gap: 10px; border: 0; background: transparent; padding: 10px 12px; text-align: left; cursor: pointer; }
+.view-row-static { cursor: default; }
+.view-row-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
+.view-row-copy > strong { overflow: hidden; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.view-row-copy > small { color: var(--muted-foreground); font-size: 9px; }
+.view-pill { border-radius: 3px; background: var(--brand-soft); padding: 2px 6px; color: var(--primary); font-size: 8px; font-weight: 650; }
+.view-row-action { width: 30px; height: 30px; margin-right: 6px; color: var(--muted-foreground); }
+.view-row-action:hover:not(:disabled) { color: var(--destructive); }
+.view-score { font-size: 14px; font-weight: 650; }
+.view-score > small { margin-left: 1px; color: var(--muted-foreground); font-size: 8px; font-weight: 400; }
+.view-restore { height: 27px; margin-right: 10px; gap: 5px; font-size: 9px; }
+@media (max-width: 720px) { .view-row { flex-wrap: wrap; } .view-restore { margin: 0 12px 10px; } .view-panel-head { flex-wrap: wrap; } }

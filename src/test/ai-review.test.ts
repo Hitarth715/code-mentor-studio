@@ -108,4 +108,14 @@ describe("runAiReview", () => {
     expect(result.ok).toBe(false);
     expect(JSON.stringify(result)).not.toContain("secret upstream body");
   });
+
+  it("retries once on a temporary 503 and reports the status if it keeps failing", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response("{}", { status: 503 })));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await runAiReview(source, "JavaScript");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({ ok: false });
+    expect(!result.ok && result.error).toContain("503");
+  });
 });
